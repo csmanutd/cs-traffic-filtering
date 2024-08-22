@@ -12,9 +12,9 @@ Get traffic data from CloudSecure and filter the data by iplists.
 2. Run the ipl script.  
    First, you must create a text file subnets.txt and put all the IP CIDR blocks in it.  
    The script will compare the src and dst IP addresses with the CIDR blocks.  
-   If any addresses don't belong to all of the CIDR blocks.
+   If any addresses don't belong to all of the CIDR blocks, the traffic log will be output to a csv file.   
    The script will also filter out all DENIED traffic.   
-   The traffic log will be output to a csv file.  
+  
    Lastly, it will upload the input and output csv files to the s3 bucket.  
    Please change the bucket name and folder as needed. Make sure you can access the s3 bucket with AWS CLI in your environment.    
    
