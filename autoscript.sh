@@ -68,12 +68,12 @@ puts "Files to delete: [glob input*.csv output*.csv]"
 # exec rm -f input*.csv output*.csv
 # puts "All input*.csv and output*.csv files deleted."
 
-exec /bin/bash /root/csv_filter/script_mbs/cleanup.sh
+exec /bin/bash /root/csv_filter/script_mbs/cleanup.sh >> /var/log/ipl 2>&1
 
 # 再次检查文件是否删除成功
-set remaining_files [glob input*.csv output*.csv]
-if {[llength $remaining_files] > 0} {
-    puts "Failed to delete some files: $remaining_files"
-} else {
-    puts "All input*.csv and output*.csv files deleted."
-}
+#set remaining_files [glob input*.csv output*.csv]
+#if {[llength $remaining_files] > 0} {
+#    puts "Failed to delete some files: $remaining_files"
+#} else {
+#    puts "All input*.csv and output*.csv files deleted."
+#}
