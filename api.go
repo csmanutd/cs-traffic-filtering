@@ -251,15 +251,17 @@ func main() {
 		}
 	}
 
-	// Define time segments (reverse order)
+	// Define time segments (6 segments, 4 hours each, reverse order)
 	timeSegments := []struct {
 		fromTime string
 		toTime   string
 	}{
-		{fromTime: date.Add(18 * time.Hour).Format(time.RFC3339), toTime: date.Add(24 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(12 * time.Hour).Format(time.RFC3339), toTime: date.Add(18 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(6 * time.Hour).Format(time.RFC3339), toTime: date.Add(12 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Format(time.RFC3339), toTime: date.Add(6 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(20 * time.Hour).Format(time.RFC3339), toTime: date.Add(24 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(16 * time.Hour).Format(time.RFC3339), toTime: date.Add(20 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(12 * time.Hour).Format(time.RFC3339), toTime: date.Add(16 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(8 * time.Hour).Format(time.RFC3339), toTime: date.Add(12 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(4 * time.Hour).Format(time.RFC3339), toTime: date.Add(8 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Format(time.RFC3339), toTime: date.Add(4 * time.Hour).Format(time.RFC3339)},
 	}
 
 	// Loop through each time segment, retrieve data, and write to CSV immediately
@@ -280,4 +282,3 @@ func main() {
 
 	fmt.Println("Data retrieval and CSV creation completed successfully.")
 }
-
