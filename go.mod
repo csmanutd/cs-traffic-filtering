@@ -1,4 +1,4 @@
-module github.com/csmanutd/cs-traffic-filtering/s3upload
+module github.com/csmanutd/cs-traffic-filtering
 
 go 1.23.1
 
