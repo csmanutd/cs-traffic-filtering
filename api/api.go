@@ -1,82 +1,38 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"os"
 	"bufio"
-	"strings"
-	"time"
 	"bytes"
 	"encoding/base64"
 	"encoding/csv"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"regexp"
+	"strings"
+	"time"
+
+	"github.com/csmanutd/cs-traffic-filtering/s3upload" // Import the s3upload package
+
+	"github.com/csmanutd/csutils"
 )
 
-// Config struct holds the API credentials and tenant ID
-type Config struct {
-	APIKey    string `json:"apiKey"`
-	APISecret string `json:"apiSecret"`
-	TenantID  string `json:"tenantID"`
+// LoadConfig 从JSON文件读取配置
+func LoadConfig(fileName string) (csutils.CloudSecureConfig, error) {
+	return csutils.LoadOrCreateCloudSecureConfig(fileName)
 }
 
-// LoadConfig reads the configuration from a JSON file
-func LoadConfig(fileName string) (Config, error) {
-	var config Config
-
-	// Check if the file exists
-	if _, err := os.Stat(fileName); os.IsNotExist(err) {
-		return config, fmt.Errorf("config file not found")
-	}
-
-	// Read the file
-	data, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		return config, err
-	}
-
-	// Parse the JSON data
-	err = json.Unmarshal(data, &config)
-	if err != nil {
-		return config, err
-	}
-
-	return config, nil
+// SaveConfig 将配置保存到JSON文件
+func SaveConfig(fileName string, config csutils.CloudSecureConfig) error {
+	return csutils.SaveCloudSecureConfig(fileName, config)
 }
 
-// SaveConfig saves the configuration to a JSON file
-func SaveConfig(fileName string, config Config) error {
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return ioutil.WriteFile(fileName, data, 0644)
-}
-
-// PromptUserInput prompts the user to input the API credentials and tenant ID
-func PromptUserInput() Config {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Print("Please enter your API Key: ")
-	apiKey, _ := reader.ReadString('\n')
-	apiKey = strings.TrimSpace(apiKey)
-
-	fmt.Print("Please enter your API Secret: ")
-	apiSecret, _ := reader.ReadString('\n')
-	apiSecret = strings.TrimSpace(apiSecret)
-
-	fmt.Print("Please enter your Tenant ID: ")
-	tenantID, _ := reader.ReadString('\n')
-	tenantID = strings.TrimSpace(tenantID)
-
-	return Config{
-		APIKey:    apiKey,
-		APISecret: apiSecret,
-		TenantID:  tenantID,
-	}
+// PromptUserInput 提示用户输入API凭证和租户ID
+func PromptUserInput() csutils.CloudSecureInfo {
+	return csutils.CreateNewCloudSecureInfo()
 }
 
 func createFlowReport(apiKey, apiSecret, tenantID, fileName, fileFormat, fromTime, toTime string, maxResults int) ([]map[string]interface{}, error) {
@@ -128,7 +84,7 @@ func createFlowReport(apiKey, apiSecret, tenantID, fileName, fileFormat, fromTim
 		return nil, fmt.Errorf("request failed with status code: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body) // 使用io包的ReadAll函数
 	if err != nil {
 		return nil, fmt.Errorf("error reading response: %v", err)
 	}
@@ -212,26 +168,79 @@ func writeCSV(fileName string, data []map[string]interface{}, appendMode bool) e
 	return nil
 }
 
-func main() {
-	const configFileName = "cloudsecure.config"
+// S3Config represents the S3 configuration
+type S3Config struct {
+	BucketName  string `json:"bucket_name"`
+	FolderName  string `json:"folder_name"`
+	ProfileName string `json:"profile_name"`
+}
 
-	// Load or prompt for configuration
+// LoadS3Config loads S3 configuration from a JSON file
+func LoadS3Config(fileName string) (S3Config, error) {
+	var config S3Config
+	file, err := os.ReadFile(fileName)
+	if err != nil {
+		return config, err
+	}
+	err = json.Unmarshal(file, &config)
+	return config, err
+}
+
+// SaveS3Config saves S3 configuration to a JSON file
+func SaveS3Config(fileName string, config S3Config) error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(fileName, data, 0644)
+}
+
+func main() {
+	const configFileName = "csconfig.json"
+
+	// Add command-line flags
+	csName := flag.String("cs", "", "Specify CloudSecure name")
+	outputFile := flag.String("out", "", "Specify output CSV file name")
+	flag.Parse()
+
+	// Load configuration
 	config, err := LoadConfig(configFileName)
 	if err != nil {
 		fmt.Println("Config file not found. Please enter your API credentials.")
-		config = PromptUserInput()
-
-		// Save the configuration
-		err := SaveConfig(configFileName, config)
-		if err != nil {
-			fmt.Printf("Failed to save config file: %v\n", err)
-			os.Exit(1)
-		}
-
+		config.CloudSecures = make(map[string]csutils.CloudSecureInfo)
+		config.DefaultCloudName = addNewCloudSecure(&config)
+		SaveConfig(configFileName, config)
 		fmt.Println("Config file saved.")
-	} else {
-		fmt.Println("Config file loaded successfully.")
 	}
+
+	// Determine which CloudSecure to use
+	selectedCS := config.DefaultCloudName
+	if *csName != "" {
+		selectedCS = *csName
+	}
+
+	// Check if the specified CloudSecure exists
+	for {
+		if _, exists := config.CloudSecures[selectedCS]; !exists {
+			fmt.Printf("CloudSecure '%s' not found. Add a new tenant? (Y/n): ", selectedCS)
+			reader := bufio.NewReader(os.Stdin)
+			response, _ := reader.ReadString('\n')
+			response = strings.TrimSpace(strings.ToLower(response))
+
+			if response == "" || response == "y" {
+				selectedCS = addNewCloudSecure(&config)
+				SaveConfig(configFileName, config)
+			} else {
+				fmt.Print("Enter CloudSecure name: ")
+				selectedCS, _ = reader.ReadString('\n')
+				selectedCS = strings.TrimSpace(selectedCS)
+			}
+		} else {
+			break
+		}
+	}
+
+	fmt.Printf("Using CloudSecure: %s\n", selectedCS)
 
 	// Prompt user for date input
 	reader := bufio.NewReader(os.Stdin)
@@ -243,12 +252,18 @@ func main() {
 	var date time.Time
 	if dateInput == "" {
 		date = time.Now().AddDate(0, 0, -1)
+		dateInput = date.Format("20060102")
 	} else {
 		date, err = time.Parse("20060102", dateInput)
 		if err != nil {
 			fmt.Printf("Invalid date format: %v\n", err)
 			os.Exit(1)
 		}
+	}
+
+	// Set default output file name if not specified
+	if *outputFile == "" {
+		*outputFile = dateInput + ".csv"
 	}
 
 	// Define time segments (6 segments, 4 hours each, reverse order)
@@ -266,19 +281,80 @@ func main() {
 
 	// Loop through each time segment, retrieve data, and write to CSV immediately
 	for i, segment := range timeSegments {
-		data, err := createFlowReport(config.APIKey, config.APISecret, config.TenantID, "input.csv", "csv", segment.fromTime, segment.toTime, 10000000)
+		data, err := createFlowReport(config.CloudSecures[selectedCS].APIKey, config.CloudSecures[selectedCS].APISecret, config.CloudSecures[selectedCS].TenantID, *outputFile, "csv", segment.fromTime, segment.toTime, 10000000)
 		if err != nil {
 			fmt.Printf("Error during data retrieval: %v\n", err)
 			os.Exit(1)
 		}
 
-		appendMode := i > 0  // Only append for the second segment onwards
-		err = writeCSV("input.csv", data, appendMode)
+		appendMode := i > 0 // Only append for the second segment onwards
+		err = writeCSV(*outputFile, data, appendMode)
 		if err != nil {
 			fmt.Printf("Error writing to CSV: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	fmt.Println("Data retrieval and CSV creation completed successfully.")
+	fmt.Printf("Data retrieval and CSV creation completed successfully. Output saved to %s\n", *outputFile)
+
+	// Ask user if they want to upload to S3
+	fmt.Print("Do you want to upload the CSV file to S3? (y/n): ")
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	if response == "y" {
+		s3Config, err := LoadS3Config("s3config.json")
+		if err == nil {
+			fmt.Printf("Current S3 configuration:\nBucket: %s\nFolder: %s\nProfile: %s\n",
+				s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
+			fmt.Print("Do you want to use this configuration? (y/n): ")
+			useExisting, _ := reader.ReadString('\n')
+			useExisting = strings.TrimSpace(strings.ToLower(useExisting))
+
+			if useExisting != "y" {
+				s3Config = S3Config{} // Reset config if user doesn't want to use existing
+			}
+		}
+
+		if s3Config == (S3Config{}) {
+			fmt.Print("Enter S3 bucket name: ")
+			s3Config.BucketName, _ = reader.ReadString('\n')
+			s3Config.BucketName = strings.TrimSpace(s3Config.BucketName)
+
+			fmt.Print("Enter S3 folder name: ")
+			s3Config.FolderName, _ = reader.ReadString('\n')
+			s3Config.FolderName = strings.TrimSpace(s3Config.FolderName)
+
+			fmt.Print("Enter AWS profile name: ")
+			s3Config.ProfileName, _ = reader.ReadString('\n')
+			s3Config.ProfileName = strings.TrimSpace(s3Config.ProfileName)
+		}
+
+		// Upload file to S3
+		err = s3upload.UploadFileToS3(*outputFile, s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
+		if err != nil {
+			fmt.Printf("Error uploading file to S3: %v\n", err)
+		} else {
+			fmt.Println("File successfully uploaded to S3")
+			// Save S3 configuration
+			err = SaveS3Config("s3config.json", s3Config)
+			if err != nil {
+				fmt.Printf("Error saving S3 configuration: %v\n", err)
+			} else {
+				fmt.Println("S3 configuration saved")
+			}
+		}
+	}
+}
+
+func addNewCloudSecure(config *csutils.CloudSecureConfig) string {
+	cloudSecureInfo := PromptUserInput()
+
+	fmt.Print("Enter CloudSecure Name: ")
+	reader := bufio.NewReader(os.Stdin)
+	cloudSecureName, _ := reader.ReadString('\n')
+	cloudSecureName = strings.TrimSpace(cloudSecureName)
+
+	config.CloudSecures[cloudSecureName] = cloudSecureInfo
+	return cloudSecureName
 }
