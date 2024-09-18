@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/csmanutd/cs-traffic-filtering/s3upload" // Import the s3upload package
+	"github.com/csmanutd/s3utils" // Import the s3utils package
 
 	"github.com/csmanutd/csutils"
 )
@@ -173,6 +173,7 @@ type S3Config struct {
 	BucketName  string `json:"bucket_name"`
 	FolderName  string `json:"folder_name"`
 	ProfileName string `json:"profile_name"`
+	Region      string `json:"region"` // 新增
 }
 
 // LoadS3Config loads S3 configuration from a JSON file
@@ -331,7 +332,7 @@ func main() {
 		}
 
 		// Upload file to S3
-		err = s3upload.UploadFileToS3(*outputFile, s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
+		err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, *outputFile, s3Config.BucketName, s3Config.FolderName)
 		if err != nil {
 			fmt.Printf("Error uploading file to S3: %v\n", err)
 		} else {
