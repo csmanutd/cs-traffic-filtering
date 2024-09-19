@@ -299,20 +299,20 @@ func main() {
 	fmt.Printf("Data retrieval and CSV creation completed successfully. Output saved to %s\n", *outputFile)
 
 	// Ask user if they want to upload to S3
-	fmt.Print("Do you want to upload the CSV file to S3? (y/n): ")
+	fmt.Print("Do you want to upload the CSV file to S3? (Y/n): ")
 	response, _ := reader.ReadString('\n')
 	response = strings.TrimSpace(strings.ToLower(response))
 
-	if response == "y" {
+	if response == "" || response == "y" {
 		s3Config, err := LoadS3Config("s3config.json")
 		if err == nil {
 			fmt.Printf("Current S3 configuration:\nBucket: %s\nFolder: %s\nProfile: %s\n",
 				s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
-			fmt.Print("Do you want to use this configuration? (y/n): ")
+			fmt.Print("Do you want to use this configuration? (Y/n): ")
 			useExisting, _ := reader.ReadString('\n')
 			useExisting = strings.TrimSpace(strings.ToLower(useExisting))
 
-			if useExisting != "y" {
+			if useExisting != "" && useExisting != "y" {
 				s3Config = S3Config{} // Reset config if user doesn't want to use existing
 			}
 		}

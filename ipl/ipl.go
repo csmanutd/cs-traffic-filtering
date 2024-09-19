@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -10,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/csmanutd/s3utils" // Import the s3utils package
 )
 
-// 读取subnet信息的函数
+// Read subnets from file
 func readSubnets(filename string) ([]*net.IPNet, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -35,7 +38,7 @@ func readSubnets(filename string) ([]*net.IPNet, error) {
 	return subnets, nil
 }
 
-// 判断IP是否在subnet中的函数
+// Judge if IP is in subnet
 func isIPInSubnets(ip string, subnets []*net.IPNet) bool {
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
@@ -49,7 +52,7 @@ func isIPInSubnets(ip string, subnets []*net.IPNet) bool {
 	return false
 }
 
-// 从CSV中提取不符合条件的行并保存到新的CSV文件，保留header
+// Extract rows that do not meet the criteria and save to a new CSV file, keeping the header
 func extractIPsFromCSV(inputFile, outputFile string, subnets []*net.IPNet) error {
 	file, err := os.Open(inputFile)
 	if err != nil {
@@ -143,9 +146,86 @@ func main() {
 	err = extractIPsFromCSV(*inputFile, *outputFile, subnets)
 	if err != nil {
 		fmt.Println("Error occurred during CSV processing:", err)
-		// Depending on the requirements, choose to exit here or continue
-		// return
+		return
 	}
 
 	fmt.Printf("CSV processing completed. Output saved to %s\n", *outputFile)
+
+	// Ask user if they want to upload to S3
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Do you want to upload the CSV file to S3? (Y/n): ")
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
+
+	if response == "" || response == "y" {
+		s3Config, err := LoadS3Config("s3config.json")
+		if err == nil {
+			fmt.Printf("Current S3 configuration:\nBucket: %s\nFolder: %s\nProfile: %s\n",
+				s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
+			fmt.Print("Do you want to use this configuration? (Y/n): ")
+			useExisting, _ := reader.ReadString('\n')
+			useExisting = strings.TrimSpace(strings.ToLower(useExisting))
+
+			if useExisting != "" && useExisting != "y" {
+				s3Config = S3Config{} // Reset config if user doesn't want to use existing
+			}
+		}
+
+		if s3Config == (S3Config{}) {
+			fmt.Print("Enter S3 bucket name: ")
+			s3Config.BucketName, _ = reader.ReadString('\n')
+			s3Config.BucketName = strings.TrimSpace(s3Config.BucketName)
+
+			fmt.Print("Enter S3 folder name: ")
+			s3Config.FolderName, _ = reader.ReadString('\n')
+			s3Config.FolderName = strings.TrimSpace(s3Config.FolderName)
+
+			fmt.Print("Enter AWS profile name: ")
+			s3Config.ProfileName, _ = reader.ReadString('\n')
+			s3Config.ProfileName = strings.TrimSpace(s3Config.ProfileName)
+		}
+
+		// Upload file to S3
+		err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, *outputFile, s3Config.BucketName, s3Config.FolderName)
+		if err != nil {
+			fmt.Printf("Error uploading file to S3: %v\n", err)
+		} else {
+			fmt.Println("File successfully uploaded to S3")
+			// Save S3 configuration
+			err = SaveS3Config("s3config.json", s3Config)
+			if err != nil {
+				fmt.Printf("Error saving S3 configuration: %v\n", err)
+			} else {
+				fmt.Println("S3 configuration saved")
+			}
+		}
+	}
+}
+
+// S3Config represents the S3 configuration
+type S3Config struct {
+	BucketName  string `json:"bucket_name"`
+	FolderName  string `json:"folder_name"`
+	ProfileName string `json:"profile_name"`
+	Region      string `json:"region"`
+}
+
+// LoadS3Config loads S3 configuration from a JSON file
+func LoadS3Config(fileName string) (S3Config, error) {
+	var config S3Config
+	file, err := os.ReadFile(fileName)
+	if err != nil {
+		return config, err
+	}
+	err = json.Unmarshal(file, &config)
+	return config, err
+}
+
+// SaveS3Config saves S3 configuration to a JSON file
+func SaveS3Config(fileName string, config S3Config) error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(fileName, data, 0644)
 }
