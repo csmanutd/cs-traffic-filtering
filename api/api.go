@@ -305,6 +305,7 @@ func main() {
 
 	if response == "" || response == "y" {
 		s3Config, err := LoadS3Config("s3config.json")
+		configChanged := false
 		if err == nil {
 			fmt.Printf("Current S3 configuration:\nBucket: %s\nFolder: %s\nProfile: %s\n",
 				s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
@@ -313,8 +314,12 @@ func main() {
 			useExisting = strings.TrimSpace(strings.ToLower(useExisting))
 
 			if useExisting != "" && useExisting != "y" {
-				s3Config = S3Config{} // Reset config if user doesn't want to use existing
+				s3Config = S3Config{} // Reset configuration
+				configChanged = true
 			}
+		} else {
+			s3Config = S3Config{} // Create new configuration if loading fails
+			configChanged = true
 		}
 
 		if s3Config == (S3Config{}) {
@@ -329,6 +334,7 @@ func main() {
 			fmt.Print("Enter AWS profile name: ")
 			s3Config.ProfileName, _ = reader.ReadString('\n')
 			s3Config.ProfileName = strings.TrimSpace(s3Config.ProfileName)
+			configChanged = true
 		}
 
 		// Upload file to S3
@@ -337,12 +343,14 @@ func main() {
 			fmt.Printf("Error uploading file to S3: %v\n", err)
 		} else {
 			fmt.Println("File successfully uploaded to S3")
-			// Save S3 configuration
-			err = SaveS3Config("s3config.json", s3Config)
-			if err != nil {
-				fmt.Printf("Error saving S3 configuration: %v\n", err)
-			} else {
-				fmt.Println("S3 configuration saved")
+			// Only save if configuration has changed
+			if configChanged {
+				err = SaveS3Config("s3config.json", s3Config)
+				if err != nil {
+					fmt.Printf("Error saving S3 configuration: %v\n", err)
+				} else {
+					fmt.Println("S3 configuration saved")
+				}
 			}
 		}
 	}
