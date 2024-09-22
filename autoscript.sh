@@ -1,14 +1,14 @@
 #!/usr/bin/expect -f
 
 # Change the directory as needed
-cd /root/csv_filter/script_mbs
+cd /root/fsx/devtools/cs-traffic-filtering
 
 # Step 1: 执行程序api，并等待其完成
 puts "Running program api..."
-spawn ./api
+spawn ./api/api
 
 # 等待程序api的提示并自动输入回车
-expect "Enter the date (YYYYMMDD) to retrieve data:"
+expect "Enter the date (YYYYMMDD) to retrieve data (leave empty for yesterday):"
 send "\r"
 
 # 检查程序api是否成功执行
@@ -20,60 +20,63 @@ if {[lindex $exit_status 3] != 0} {
 }
 puts "Program api executed successfully."
 
-# 检查是否生成了input.csv文件
-if {![file exists "input.csv"]} {
-    puts "input.csv file not found."
-    exit 1
+# 获取昨天的日期
+set yesterday [clock format [clock add [clock seconds] -1 days] -format "%Y%m%d"]
+
+# 首先检查是否存在昨天的csv文件
+set csv_file [glob -nocomplain api/${yesterday}.csv]
+if {[llength $csv_file] == 0} {
+    puts "Searching for yyyymmdd.csv file in api/ directory..."
+    set csv_files [glob -nocomplain api/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].csv]
+    if {[llength $csv_files] == 0} {
+        puts "No yyyymmdd.csv files found in api/ directory."
+        exit 1
+    } else {
+        # 按文件名排序，选择最新的文件
+        set csv_file [lindex [lsort -decreasing $csv_files] 0]
+        puts "Found CSV file: $csv_file"
+    }
+} else {
+    puts "CSV file for yesterday ($csv_file) found."
 }
-puts "input.csv file found."
 
-# Step 2: 导入环境变量
-set env(AWS_PROFILE) nris
-puts "Environment variable AWS_PROFILE set to nris."
+# 提取文件名（不包含路径）
+set csv_filename [file tail $csv_file]
 
-# Step 3: 执行程序ipl，并等待其完成
-puts "Running program ipl..."
-spawn ./ipl
-
-# 等待程序ipl的提示并自动输入回车
-expect "Please input the date of the file (YYYYMMDD)，Press Enter to use the default value (yesterday):"
+# 上传CSV文件至S3
+expect "Do you want to upload the CSV file to S3? (Y/n):"
 send "\r"
+expect eof
+
+# Step 2: 执行程序ipl，并等待其完成
+puts "Running program ipl..."
+spawn ./ipl/ipl -input api/$csv_filename
 
 # 检查程序ipl是否成功执行
+expect "CSV processing completed. Output saved to ../api/[clock format [clock seconds] -format "%Y%m%d"]_ipl_filtered.csv"
+expect "Do you want to upload the CSV file to S3? (Y/n):"
+send "\r"
 expect eof
-set exit_status [wait]
-if {[lindex $exit_status 3] != 0} {
-    puts "Program ipl failed to execute."
-    exit 1
-}
-puts "Program ipl executed successfully."
 
-# 确保文件写入完成
-sleep 2
+# Step 3: 执行程序fl，并等待其完成
+puts "Running program fl..."
+spawn ./fl/fl -input api/$csv_filename
 
-# 检查是否生成了output开头的csv文件
-set output_file [glob -nocomplain output*.csv]
-if {[llength $output_file] == 0} {
-    puts "No output*.csv file found."
-    exit 1
-}
-puts "Output file $output_file found."
+# 检查程序fl是否成功执行
+expect "CSV filtering completed. Output saved to ../api/[clock format [clock seconds] -format "%Y%m%d"]_fl_filtered.csv"
+expect "Do you want to upload the CSV file to S3? (Y/n):"
+send "\r"
+expect eof
 
-# Step 4: 删除以input和output开头的csv文件
-sleep 10
+# Step 4: 执行程序gm，并等待其完成
+puts "Running program gm..."
+spawn ./gm/gm -input api/$csv_filename
 
-puts "Current directory: [pwd]"
-puts "Files to delete: [glob input*.csv output*.csv]"
+# 检查程序gm是否成功执行
+expect "CSV filtering completed. Output saved to ../api/[clock format [clock seconds] -format "%Y%m%d"]_gm_filtered.csv"
+expect "Do you want to upload the CSV file to S3? (Y/n):"
+send "\r"
+expect eof
 
-# exec rm -f input*.csv output*.csv
-# puts "All input*.csv and output*.csv files deleted."
-
-exec /bin/bash /root/csv_filter/script_mbs/cleanup.sh >> /var/log/ipl.log
-
-# 再次检查文件是否删除成功
-#set remaining_files [glob input*.csv output*.csv]
-#if {[llength $remaining_files] > 0} {
-#    puts "Failed to delete some files: $remaining_files"
-#} else {
-#    puts "All input*.csv and output*.csv files deleted."
-#}
+# Step 5: 执行cleanup.sh
+exec /bin/bash cleanup.sh >> /var/log/ipl.log
