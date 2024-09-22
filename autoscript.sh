@@ -46,24 +46,24 @@ if {[lindex $exit_status 3] != 0} {
 puts "Program api executed successfully."
 
 # 获取昨天的日期
-#set yesterday [clock format [clock add [clock seconds] -1 days] -format "%Y%m%d"]
+set yesterday [clock format [clock add [clock seconds] -1 days] -format "%Y%m%d"]
 
 # 首先检查是否存在昨天的csv文件
-#set csv_file [glob -nocomplain api/${yesterday}.csv]
-#if {[llength $csv_file] == 0} {
-#    puts "Searching for yyyymmdd.csv file in api/ directory..."
-#    set csv_files [glob -nocomplain api/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].csv]
-#    if {[llength $csv_files] == 0} {
-#        puts "No yyyymmdd.csv files found in api/ directory."
-#        exit 1
-#    } else {
+set csv_file [glob -nocomplain api/${yesterday}.csv]
+if {[llength $csv_file] == 0} {
+    puts "Searching for yyyymmdd.csv file in api/ directory..."
+    set csv_files [glob -nocomplain api/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].csv]
+    if {[llength $csv_files] == 0} {
+        puts "No yyyymmdd.csv files found in api/ directory."
+        exit 1
+    } else {
         # 按文件名排序，选择最新的文件
-        #set csv_file [lindex [lsort -decreasing $csv_files] 0]
-        #puts "Found CSV file: $csv_file"
-    #}
-#} else {
-    #puts "CSV file for yesterday ($csv_file) found."
-#}
+        set csv_file [lindex [lsort -decreasing $csv_files] 0]
+        puts "Found CSV file: $csv_file"
+    }
+} else {
+    puts "CSV file for yesterday ($csv_file) found."
+}
 
 # 提取文件名（不包含路径）
 set csv_filename [file tail $csv_file]
