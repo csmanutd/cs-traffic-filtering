@@ -1,11 +1,12 @@
 #!/usr/bin/expect -f
 
-# Change the directory as needed
-cd /root/fsx/devtools/cs-traffic-filtering
+# 设置基础目录
+set base_dir "/root/fsx/devtools/cs-traffic-filtering"
+cd $base_dir
 
 # Step 1: 执行程序api，并等待其完成
 puts "Running program api..."
-spawn ./api/api
+spawn sh -c "cd $base_dir/api && ./api"
 
 # 等待程序api的提示并自动输入回车
 expect "Enter the date (YYYYMMDD) to retrieve data (leave empty for yesterday):"
@@ -50,7 +51,7 @@ expect eof
 
 # Step 2: 执行程序ipl，并等待其完成
 puts "Running program ipl..."
-spawn ./ipl/ipl -input api/$csv_filename
+spawn sh -c "cd $base_dir/ipl && ./ipl -input ../api/$csv_filename"
 
 # 检查程序ipl是否成功执行
 expect "CSV processing completed. Output saved to ../api/[clock format [clock seconds] -format "%Y%m%d"]_ipl_filtered.csv"
@@ -60,7 +61,7 @@ expect eof
 
 # Step 3: 执行程序fl，并等待其完成
 puts "Running program fl..."
-spawn ./fl/fl -input api/$csv_filename
+spawn sh -c "cd $base_dir/fl && ./fl -input ../api/$csv_filename"
 
 # 检查程序fl是否成功执行
 expect "CSV filtering completed. Output saved to ../api/[clock format [clock seconds] -format "%Y%m%d"]_fl_filtered.csv"
@@ -70,7 +71,7 @@ expect eof
 
 # Step 4: 执行程序gm，并等待其完成
 puts "Running program gm..."
-spawn ./gm/gm -input api/$csv_filename
+spawn sh -c "cd $base_dir/gm && ./gm -input ../api/$csv_filename"
 
 # 检查程序gm是否成功执行
 expect "CSV filtering completed. Output saved to ../api/[clock format [clock seconds] -format "%Y%m%d"]_gm_filtered.csv"
@@ -79,4 +80,4 @@ send "\r"
 expect eof
 
 # Step 5: 执行cleanup.sh
-exec /bin/bash cleanup.sh >> /var/log/ipl.log
+exec /bin/bash $base_dir/cleanup.sh >> /var/log/ipl.log
