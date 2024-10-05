@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/csmanutd/s3utils"
 )
@@ -267,12 +268,14 @@ func uploadToS3(s3Config S3Config, configChanged bool, outputFile string, window
 		regionEntry := widget.NewEntry()
 		regionEntry.SetPlaceHolder("AWS region")
 
-		dialog.ShowForm("S3 Configuration", "Upload", "Cancel", []*widget.FormItem{
-			widget.NewFormItem("Bucket", bucketEntry),
-			widget.NewFormItem("Folder", folderEntry),
-			widget.NewFormItem("Profile", profileEntry),
-			widget.NewFormItem("Region", regionEntry),
-		}, func(confirm bool) {
+		content := container.New(layout.NewFormLayout(),
+			widget.NewLabel("Bucket"), bucketEntry,
+			widget.NewLabel("Folder"), folderEntry,
+			widget.NewLabel("Profile"), profileEntry,
+			widget.NewLabel("Region"), regionEntry,
+		)
+
+		dialog.ShowCustomConfirm("S3 Configuration", "Upload", "Cancel", content, func(confirm bool) {
 			if confirm {
 				s3Config.BucketName = bucketEntry.Text
 				s3Config.FolderName = folderEntry.Text
@@ -362,19 +365,22 @@ func main() {
 
 		selectedListsLabel := widget.NewLabel("")
 
-		listContainer := container.NewVBox(listSelect, addListBtn, selectedListsLabel)
-
 		addListBtn.OnTapped = func() {
 			if listSelect.Selected != "" {
 				selectedListFiles = append(selectedListFiles, listSelect.Selected)
 				selectedListsLabel.SetText(strings.Join(selectedListFiles, ", "))
-				listSelect.SetSelected("")
+				listSelect.ClearSelected() // Clear the selection after adding
 			}
 		}
 
 		conditionBox := container.NewVBox(
-			container.NewHBox(fieldSelect, operatorSelect),
-			listContainer,
+			container.NewHBox(
+				fieldSelect,
+				operatorSelect,
+				listSelect,
+				addListBtn,
+			),
+			selectedListsLabel,
 		)
 		conditionsContainer.Add(conditionBox)
 	})
@@ -393,8 +399,7 @@ func main() {
 			box := child.(*fyne.Container)
 			field := box.Objects[0].(*fyne.Container).Objects[0].(*widget.Select).Selected
 			operator := box.Objects[0].(*fyne.Container).Objects[1].(*widget.Select).Selected
-			listContainer := box.Objects[1].(*fyne.Container)
-			selectedListsLabel := listContainer.Objects[2].(*widget.Label)
+			selectedListsLabel := box.Objects[1].(*widget.Label)
 			listFiles := strings.Split(selectedListsLabel.Text, ", ")
 
 			if len(listFiles) == 0 || (len(listFiles) == 1 && listFiles[0] == "") {
