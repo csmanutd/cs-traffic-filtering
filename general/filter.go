@@ -30,6 +30,7 @@ type FilterCondition struct {
 
 // S3Config represents the S3 configuration
 type S3Config struct {
+	PresetName  string `json:"preset_name"`
 	BucketName  string `json:"bucket_name"`
 	FolderName  string `json:"folder_name"`
 	ProfileName string `json:"profile_name"`
@@ -118,14 +119,14 @@ func isPublicIP(ip string) bool {
 }
 
 // isIPInAnyList checks if an IP is in any of the provided lists
-func isIPInAnyList(ip string, ipLists map[string]map[string]bool) bool {
-	for _, list := range ipLists {
-		if isIPInList(ip, list) {
-			return true
-		}
-	}
-	return false
-}
+//func isIPInAnyList(ip string, ipLists map[string]map[string]bool) bool {
+//	for _, list := range ipLists {
+//		if isIPInList(ip, list) {
+//			return true
+//		}
+//	}
+//	return false
+//}
 
 // filterCSV filters the CSV file based on given conditions
 func filterCSV(inputFile, outputFile string, conditions []FilterCondition, flowStatus string) error {
@@ -135,6 +136,7 @@ func filterCSV(inputFile, outputFile string, conditions []FilterCondition, flowS
 	}
 	defer file.Close()
 
+	// 创建输出文件，如果已存在则覆盖
 	writer, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("error creating output file: %v", err)
@@ -243,99 +245,77 @@ func getFilesWithExtension(ext string) ([]string, error) {
 }
 
 // promptS3Upload prompts the user to upload the file to S3
-func promptS3Upload(outputFile string, window fyne.Window) {
-	if window == nil {
-		// CLI 模式
-		fmt.Print("Do you want to upload the CSV file to S3? (y/n): ")
-		var response string
-		fmt.Scanln(&response)
-		if strings.ToLower(response) == "y" {
-			s3Config, err := LoadS3Config("s3config.json")
-			if err != nil {
-				fmt.Println("Error loading S3 configuration:", err)
-				return
-			}
-			err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, outputFile, s3Config.BucketName, s3Config.FolderName)
-			if err != nil {
-				fmt.Println("Error uploading file to S3:", err)
-			} else {
-				fmt.Println("File successfully uploaded to S3 bucket", s3Config.BucketName)
-			}
-		}
-	} else {
-		// GUI 模式 - 保持原有的代码不变
-		dialog.ShowConfirm("Upload to S3", "Do you want to upload the CSV file to S3?", func(upload bool) {
-			if upload {
-				s3Config, err := LoadS3Config("s3config.json")
-				configChanged := false
-				if err == nil {
-					dialog.ShowConfirm("S3 Configuration", fmt.Sprintf("Current S3 configuration:\nBucket: %s\nFolder: %s\nProfile: %s\nDo you want to use this configuration?", s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName), func(useExisting bool) {
-						if !useExisting {
-							s3Config = S3Config{} // Reset configuration
-							configChanged = true
-						}
-						uploadToS3(s3Config, configChanged, outputFile, window)
-					}, window)
-				} else {
-					s3Config = S3Config{} // Create new configuration if loading fails
-					configChanged = true
-					uploadToS3(s3Config, configChanged, outputFile, window)
-				}
-			}
-		}, window)
-	}
-}
-
-func uploadToS3(s3Config S3Config, configChanged bool, outputFile string, window fyne.Window) {
-	if s3Config == (S3Config{}) {
-		bucketEntry := widget.NewEntry()
-		bucketEntry.SetPlaceHolder("S3 bucket name")
-		folderEntry := widget.NewEntry()
-		folderEntry.SetPlaceHolder("S3 folder name")
-		profileEntry := widget.NewEntry()
-		profileEntry.SetPlaceHolder("AWS profile name")
-		regionEntry := widget.NewEntry()
-		regionEntry.SetPlaceHolder("AWS region")
-
-		content := container.New(layout.NewFormLayout(),
-			widget.NewLabel("Bucket"), bucketEntry,
-			widget.NewLabel("Folder"), folderEntry,
-			widget.NewLabel("Profile"), profileEntry,
-			widget.NewLabel("Region"), regionEntry,
-		)
-
-		dialog.ShowCustomConfirm("S3 Configuration", "Upload", "Cancel", content, func(confirm bool) {
-			if confirm {
-				s3Config.BucketName = bucketEntry.Text
-				s3Config.FolderName = folderEntry.Text
-				s3Config.ProfileName = profileEntry.Text
-				s3Config.Region = regionEntry.Text
-				configChanged = true
-				performS3Upload(s3Config, configChanged, outputFile, window)
-			}
-		}, window)
-	} else {
-		performS3Upload(s3Config, configChanged, outputFile, window)
-	}
-}
-
-func performS3Upload(s3Config S3Config, configChanged bool, outputFile string, window fyne.Window) {
-	err := s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, outputFile, s3Config.BucketName, s3Config.FolderName)
+func promptS3Upload(outputFile string, presetName string, window fyne.Window) {
+	s3Configs, err := LoadS3Configs("s3config.json")
 	if err != nil {
-		dialog.ShowError(fmt.Errorf("error uploading file to S3: %v", err), window)
-	} else {
-		// Show success message
-		dialog.ShowInformation("Upload Successful", fmt.Sprintf("File %s successfully uploaded to S3 bucket %s", filepath.Base(outputFile), s3Config.BucketName), window)
+		fmt.Println("Error loading S3 configurations:", err)
+		s3Configs = []S3Config{}
+	}
 
-		if configChanged {
-			err = SaveS3Config("s3config.json", s3Config)
-			if err != nil {
-				dialog.ShowError(fmt.Errorf("error saving S3 configuration: %v", err), window)
-			} else {
-				dialog.ShowInformation("Configuration Saved", "S3 configuration has been saved successfully", window)
-			}
+	s3Config := getS3ConfigForPreset(s3Configs, presetName)
+
+	// Only prompt for input if the configuration is empty
+	if s3Config.BucketName == "" {
+		if window == nil {
+			// CLI mode
+			s3Config = promptS3ConfigCLI(s3Config)
+		} else {
+			// GUI mode
+			s3Config = promptS3ConfigGUI(s3Config, window)
+		}
+	} else {
+		fmt.Printf("Using existing configuration for preset: %s\n", presetName)
+	}
+
+	err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, outputFile, s3Config.BucketName, s3Config.FolderName)
+	if err != nil {
+		if window == nil {
+			fmt.Println("Error uploading file to S3:", err)
+		} else {
+			dialog.ShowError(fmt.Errorf("error uploading file to S3: %v", err), window)
+		}
+	} else {
+		if window == nil {
+			fmt.Println("File successfully uploaded to S3 bucket", s3Config.BucketName)
+		} else {
+			dialog.ShowInformation("Upload Successful", fmt.Sprintf("File %s successfully uploaded to S3 bucket %s", filepath.Base(outputFile), s3Config.BucketName), window)
 		}
 	}
+
+	// Save the updated configuration only if it's new
+	if s3Config.PresetName != "" && !configExists(s3Configs, s3Config.PresetName) {
+		s3Configs = append(s3Configs, s3Config)
+		saveS3Configs("s3config.json", s3Configs)
+	}
+}
+
+func configExists(configs []S3Config, presetName string) bool {
+	for _, config := range configs {
+		if config.PresetName == presetName {
+			return true
+		}
+	}
+	return false
+}
+
+// getS3ConfigForPreset returns the S3 configuration for the given preset name
+// If no matching configuration is found, it returns the default configuration
+func getS3ConfigForPreset(configs []S3Config, presetName string) S3Config {
+	fmt.Printf("Searching for preset: %s\n", presetName)
+	for _, config := range configs {
+		fmt.Printf("Checking config: %+v\n", config)
+		if config.PresetName == presetName {
+			fmt.Printf("Found matching config for preset: %s\n", presetName)
+			return config
+		}
+	}
+	fmt.Printf("No matching config found for preset: %s. Using default.\n", presetName)
+	// If no matching configuration is found, return the default (first) configuration
+	if len(configs) > 0 {
+		return configs[0]
+	}
+	// If no configurations are available, return an empty configuration
+	return S3Config{}
 }
 
 // SavePreset saves a preset to the presets file
@@ -364,6 +344,89 @@ func LoadPresets() ([]Preset, error) {
 	}
 	err = json.Unmarshal(data, &presets)
 	return presets, err
+}
+
+// LoadS3Configs loads S3 configurations from a JSON file
+func LoadS3Configs(fileName string) ([]S3Config, error) {
+	var configs []S3Config
+	file, err := os.ReadFile(fileName)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []S3Config{}, nil
+		}
+		return nil, err
+	}
+	err = json.Unmarshal(file, &configs)
+	if err != nil {
+		// Try to unmarshal as a single config
+		var singleConfig S3Config
+		err = json.Unmarshal(file, &singleConfig)
+		if err != nil {
+			return nil, err
+		}
+		configs = []S3Config{singleConfig}
+	}
+	return configs, nil
+}
+
+func promptS3ConfigCLI(config S3Config) S3Config {
+	fmt.Println("Please enter S3 configuration:")
+
+	if config.PresetName == "" {
+		fmt.Print("Preset Name: ")
+		fmt.Scanln(&config.PresetName)
+	}
+
+	fmt.Print("Bucket Name: ")
+	fmt.Scanln(&config.BucketName)
+
+	fmt.Print("Folder Name: ")
+	fmt.Scanln(&config.FolderName)
+
+	fmt.Print("Profile Name: ")
+	fmt.Scanln(&config.ProfileName)
+
+	fmt.Print("Region: ")
+	fmt.Scanln(&config.Region)
+
+	return config
+}
+
+func promptS3ConfigGUI(config S3Config, window fyne.Window) S3Config {
+	bucketEntry := widget.NewEntry()
+	bucketEntry.SetText(config.BucketName)
+	folderEntry := widget.NewEntry()
+	folderEntry.SetText(config.FolderName)
+	profileEntry := widget.NewEntry()
+	profileEntry.SetText(config.ProfileName)
+	regionEntry := widget.NewEntry()
+	regionEntry.SetText(config.Region)
+
+	content := container.New(layout.NewFormLayout(),
+		widget.NewLabel("Bucket"), bucketEntry,
+		widget.NewLabel("Folder"), folderEntry,
+		widget.NewLabel("Profile"), profileEntry,
+		widget.NewLabel("Region"), regionEntry,
+	)
+
+	dialog.ShowCustomConfirm("S3 Configuration", "Upload", "Cancel", content, func(confirm bool) {
+		if confirm {
+			config.BucketName = bucketEntry.Text
+			config.FolderName = folderEntry.Text
+			config.ProfileName = profileEntry.Text
+			config.Region = regionEntry.Text
+		}
+	}, window)
+
+	return config
+}
+
+func saveS3Configs(fileName string, configs []S3Config) error {
+	data, err := json.MarshalIndent(configs, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(fileName, data, 0644)
 }
 
 func main() {
@@ -426,7 +489,7 @@ func main() {
 		err = filterCSV(*cliInputFile, outputFile, selectedPreset.Conditions, selectedPreset.FlowStatus)
 		if err != nil {
 			fmt.Println("Filtering complete:", err)
-			promptS3Upload(outputFile, nil) // use nil for CLI mode
+			promptS3Upload(outputFile, *presetName, nil) // use nil for CLI mode
 		} else {
 			fmt.Printf("Error during filtering: %v\n", err)
 			os.Exit(1)
@@ -461,6 +524,29 @@ func main() {
 
 	conditionsContainer := container.NewVBox()
 
+	// Create flow status select
+	flowStatusSelect := widget.NewSelect([]string{"ALLOWED", "DENIED"}, nil)
+	flowStatusSelect.SetSelected("ALLOWED")
+
+	// Create preset selection dropdown
+	presets, _ := LoadPresets()
+	var presetNames []string
+	presetNames = append(presetNames, "Select Preset") // Add initial value
+	for _, p := range presets {
+		presetNames = append(presetNames, p.Name)
+	}
+	presetSelect := widget.NewSelect(presetNames, func(selected string) {
+		if selected != "Select Preset" {
+			loadPreset(selected, conditionsContainer, flowStatusSelect)
+		} else {
+			// Clear conditions when "Select Preset" is chosen
+			conditionsContainer.Objects = nil
+			conditionsContainer.Refresh()
+		}
+	})
+	presetSelect.SetSelected("Select Preset") // Set initial selection
+
+	// Create add condition button
 	addConditionBtn := widget.NewButton("Add Filter Condition", func() {
 		fieldSelect := widget.NewSelect([]string{"sourceIP", "destIP"}, nil)
 		operatorSelect := widget.NewSelect([]string{"==", "!="}, nil)
@@ -495,9 +581,17 @@ func main() {
 		conditionsContainer.Add(conditionBox)
 	})
 
-	flowStatusSelect := widget.NewSelect([]string{"ALLOWED", "DENIED"}, nil)
-	flowStatusSelect.SetSelected("ALLOWED")
+	// Create clear filter button
+	clearFilterBtn := widget.NewButton("Clear Filter", func() {
+		conditionsContainer.Objects = nil
+		conditionsContainer.Refresh()
 
+		// Reset preset selection to initial state
+		presetSelect.SetSelected("Select Preset")
+	})
+	clearFilterBtn.Importance = widget.DangerImportance
+
+	// Create filter button
 	filterBtn := widget.NewButton("Start Filtering", func() {
 		if inputFile == "" {
 			dialog.ShowError(fmt.Errorf("please select an input file"), myWindow)
@@ -525,16 +619,16 @@ func main() {
 			return
 		}
 
-		outputFile := strings.TrimSuffix(inputFile, filepath.Ext(inputFile)) + "_filtered.csv"
+		outputFile := generateOutputFileName(inputFile, presetSelect.Selected)
 		err := filterCSV(inputFile, outputFile, conditions, flowStatusSelect.Selected)
 		if err != nil {
 			dialog.ShowInformation("Filtering Complete", err.Error(), myWindow)
-			promptS3Upload(outputFile, myWindow)
+			promptS3Upload(outputFile, presetSelect.Selected, myWindow)
 		} else {
 			dialog.ShowError(fmt.Errorf("filtering error: %v", err), myWindow)
 		}
 	})
-	filterBtn.Importance = widget.HighImportance // 设置按钮为高重要性
+	filterBtn.Importance = widget.HighImportance
 
 	savePresetBtn := widget.NewButton("Save Preset", func() {
 		var conditions []FilterCondition
@@ -578,9 +672,10 @@ func main() {
 		}, myWindow)
 	})
 
-	// Create a horizontal container with two buttons
+	// Modify button container, add clear filter condition button
 	buttonContainer := container.NewHBox(
 		layout.NewSpacer(), // Add a spacer to push the buttons to the right
+		clearFilterBtn,
 		savePresetBtn,
 		filterBtn,
 	)
@@ -588,11 +683,84 @@ func main() {
 	content := container.NewVBox(
 		inputSelect,
 		flowStatusSelect,
-		addConditionBtn,
+		container.NewHBox(
+			presetSelect,
+			layout.NewSpacer(),
+			addConditionBtn,
+		),
 		conditionsContainer,
-		buttonContainer, // Use the new button container
+		buttonContainer,
 	)
 
 	myWindow.SetContent(content)
 	myWindow.ShowAndRun()
+}
+
+// loadPreset loads a preset and updates the GUI
+func loadPreset(presetName string, conditionsContainer *fyne.Container, flowStatusSelect *widget.Select) {
+	presets, err := LoadPresets()
+	if err != nil {
+		// Handle error
+		return
+	}
+
+	var selectedPreset Preset
+	for _, p := range presets {
+		if p.Name == presetName {
+			selectedPreset = p
+			break
+		}
+	}
+
+	if selectedPreset.Name == "" {
+		// Preset not found
+		return
+	}
+
+	// Clear existing conditions
+	conditionsContainer.Objects = nil
+
+	// Load preset conditions
+	for _, cond := range selectedPreset.Conditions {
+		addConditionToGUI(conditionsContainer, cond)
+	}
+
+	// Set flow status
+	flowStatusSelect.SetSelected(selectedPreset.FlowStatus)
+
+	// Refresh GUI
+	conditionsContainer.Refresh()
+}
+
+// Add new function to add condition to GUI
+func addConditionToGUI(conditionsContainer *fyne.Container, condition FilterCondition) {
+	fieldSelect := widget.NewSelect([]string{"sourceIP", "destIP"}, nil)
+	fieldSelect.SetSelected(condition.Field)
+
+	operatorSelect := widget.NewSelect([]string{"==", "!="}, nil)
+	operatorSelect.SetSelected(condition.Operator)
+
+	selectedListsLabel := widget.NewLabel(strings.Join(condition.ListFiles, ", "))
+
+	conditionBox := container.NewVBox(
+		container.NewHBox(
+			fieldSelect,
+			operatorSelect,
+		),
+		selectedListsLabel,
+	)
+	conditionsContainer.Add(conditionBox)
+}
+
+// generateOutputFileName creates the output file name based on the input file and preset
+func generateOutputFileName(inputFile, presetName string) string {
+	dir := filepath.Dir(inputFile)
+	fileName := filepath.Base(inputFile)
+	fileExt := filepath.Ext(fileName)
+	fileNameWithoutExt := strings.TrimSuffix(fileName, fileExt)
+
+	if presetName == "" || presetName == "Select Preset" {
+		return filepath.Join(dir, fmt.Sprintf("%s_filtered%s", fileNameWithoutExt, fileExt))
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s_%s%s", fileNameWithoutExt, presetName, fileExt))
 }
