@@ -485,7 +485,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		outputFile := *cliInputFile + "_filtered.csv"
+		// Use generateOutputFileName function for consistent naming
+		outputFile := generateOutputFileName(*cliInputFile, *presetName)
 		err = filterCSV(*cliInputFile, outputFile, selectedPreset.Conditions, selectedPreset.FlowStatus)
 		if err != nil {
 			fmt.Println("Filtering complete:", err)
@@ -529,22 +530,30 @@ func main() {
 	flowStatusSelect.SetSelected("ALLOWED")
 
 	// Create preset selection dropdown
-	presets, _ := LoadPresets()
-	var presetNames []string
-	presetNames = append(presetNames, "Select Preset") // Add initial value
-	for _, p := range presets {
-		presetNames = append(presetNames, p.Name)
-	}
-	presetSelect := widget.NewSelect(presetNames, func(selected string) {
-		if selected != "Select Preset" {
-			loadPreset(selected, conditionsContainer, flowStatusSelect)
-		} else {
-			// Clear conditions when "Select Preset" is chosen
-			conditionsContainer.Objects = nil
-			conditionsContainer.Refresh()
-		}
+	presetSelect := widget.NewSelect(getPresetNames(), func(selected string) {
+		loadPreset(selected, conditionsContainer, flowStatusSelect)
 	})
-	presetSelect.SetSelected("Select Preset") // Set initial selection
+	presetSelect.PlaceHolder = "Select Preset"
+
+	// Create delete preset button
+	deletePresetBtn := widget.NewButton("Delete Preset", func() {
+		if presetSelect.Selected == "" || presetSelect.Selected == "Select Preset" {
+			dialog.ShowInformation("Error", "Please select a preset to delete", myWindow)
+			return
+		}
+		dialog.ShowConfirm("Confirm Delete", "Are you sure you want to delete this preset?", func(confirm bool) {
+			if confirm {
+				err := DeletePreset(presetSelect.Selected)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("error deleting preset: %v", err), myWindow)
+				} else {
+					dialog.ShowInformation("Success", "Preset deleted successfully", myWindow)
+					refreshPresetSelect(presetSelect)
+				}
+			}
+		}, myWindow)
+	})
+	deletePresetBtn.Importance = widget.WarningImportance // Set button to warning importance (usually orange or yellow)
 
 	// Create add condition button
 	addConditionBtn := widget.NewButton("Add Filter Condition", func() {
@@ -667,14 +676,15 @@ func main() {
 					dialog.ShowError(fmt.Errorf("error saving preset: %v", err), myWindow)
 				} else {
 					dialog.ShowInformation("Save Successful", "Preset has been saved successfully", myWindow)
+					refreshPresetSelect(presetSelect)
 				}
 			}
 		}, myWindow)
 	})
 
-	// Modify button container, add clear filter condition button
+	// Modify button container, remove delete preset button from here
 	buttonContainer := container.NewHBox(
-		layout.NewSpacer(), // Add a spacer to push the buttons to the right
+		layout.NewSpacer(),
 		clearFilterBtn,
 		savePresetBtn,
 		filterBtn,
@@ -685,6 +695,7 @@ func main() {
 		flowStatusSelect,
 		container.NewHBox(
 			presetSelect,
+			deletePresetBtn,
 			layout.NewSpacer(),
 			addConditionBtn,
 		),
@@ -763,4 +774,43 @@ func generateOutputFileName(inputFile, presetName string) string {
 		return filepath.Join(dir, fmt.Sprintf("%s_filtered%s", fileNameWithoutExt, fileExt))
 	}
 	return filepath.Join(dir, fmt.Sprintf("%s_%s%s", fileNameWithoutExt, presetName, fileExt))
+}
+
+// New function to get preset names
+func getPresetNames() []string {
+	presets, err := LoadPresets()
+	if err != nil {
+		return []string{"Select Preset"}
+	}
+	names := []string{"Select Preset"}
+	for _, p := range presets {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+// New function to refresh preset select
+func refreshPresetSelect(presetSelect *widget.Select) {
+	presetSelect.Options = getPresetNames()
+	presetSelect.SetSelected("Select Preset")
+	presetSelect.Refresh()
+}
+
+// New function to delete a preset
+func DeletePreset(presetName string) error {
+	presets, err := LoadPresets()
+	if err != nil {
+		return err
+	}
+	var newPresets []Preset
+	for _, p := range presets {
+		if p.Name != presetName {
+			newPresets = append(newPresets, p)
+		}
+	}
+	data, err := json.MarshalIndent(newPresets, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile("presets.json", data, 0644)
 }
