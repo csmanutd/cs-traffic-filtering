@@ -65,7 +65,7 @@ func SaveS3Config(fileName string, config S3Config) error {
 }
 
 // loadIPs loads IPs from a file into a map
-func loadIPs(filename string) (map[string]bool, error) {
+func loadIPs(filename string) ([]net.IPNet, error) {
 	absPath, err := filepath.Abs(filename)
 	if err != nil {
 		return nil, fmt.Errorf("error getting absolute path: %v", err)
@@ -80,23 +80,41 @@ func loadIPs(filename string) (map[string]bool, error) {
 	}
 	defer file.Close()
 
-	ipMap := make(map[string]bool)
+	var ipNets []net.IPNet
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		ip := strings.TrimSpace(scanner.Text())
-		ipMap[ip] = true
+		ipOrCIDR := strings.TrimSpace(scanner.Text())
+		_, ipNet, err := net.ParseCIDR(ipOrCIDR)
+		if err != nil {
+			// If not a CIDR, try as a single IP
+			ip := net.ParseIP(ipOrCIDR)
+			if ip == nil {
+				return nil, fmt.Errorf("invalid IP or CIDR: %s", ipOrCIDR)
+			}
+			ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
+		}
+		ipNets = append(ipNets, *ipNet)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading IP list file: %v", err)
 	}
 
-	fmt.Printf("Successfully loaded %d IPs from file\n", len(ipMap))
-	return ipMap, nil
+	fmt.Printf("Successfully loaded %d IPs from file\n", len(ipNets))
+	return ipNets, nil
 }
 
 // isIPInList checks if an IP is in the list
-func isIPInList(ip string, ipList map[string]bool) bool {
-	return ipList[ip]
+func isIPInList(ip string, ipNets []net.IPNet) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+	for _, ipNet := range ipNets {
+		if ipNet.Contains(parsedIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // isPublicIP checks if an IP is a public IP
@@ -136,7 +154,7 @@ func filterCSV(inputFile, outputFile string, conditions []FilterCondition, flowS
 	}
 	defer file.Close()
 
-	// 创建输出文件，如果已存在则覆盖
+	// Create output file
 	writer, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("error creating output file: %v", err)
@@ -155,7 +173,7 @@ func filterCSV(inputFile, outputFile string, conditions []FilterCondition, flowS
 	csvWriter.Write(header)
 
 	// Load IP lists
-	ipLists := make(map[string]map[string]bool)
+	ipLists := make(map[string][]net.IPNet)
 	for _, cond := range conditions {
 		for _, listFile := range cond.ListFiles {
 			if listFile != "Internet" && ipLists[listFile] == nil {
