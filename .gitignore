@@ -4,3 +4,4 @@
 *.csv
 filter
 *.png
+filter_cli
