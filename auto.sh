@@ -55,9 +55,9 @@ if {[lindex $exit_status 3] != 0} {
 }
 puts "Program api executed successfully."
 
-# 移动CSV文件到filtering_cli文件夹
-puts "Moving CSV file to filtering_cli folder..."
-exec mv "$base_dir/api/$csv_file" "$base_dir/filtering_cli/"
+# 移动CSV文件到filter_cli文件夹
+puts "Moving CSV file to filter_cli folder..."
+exec mv "$base_dir/api/$csv_file" "$base_dir/filter_cli/"
 
 # 定义要执行的预设列表
 set presets {fL gM NPOQ}
@@ -65,7 +65,7 @@ set presets {fL gM NPOQ}
 # 循环执行每个预设
 foreach preset $presets {
     puts "Running filter_cli with preset $preset..."
-    spawn sh -c "cd $base_dir/filtering_cli && ./filter_cli -input $csv_file -preset $preset"
+    spawn sh -c "cd $base_dir/filter_cli && ./filter_cli -input $csv_file -preset $preset"
     
     expect {
         "File successfully uploaded to S3 bucket" {
