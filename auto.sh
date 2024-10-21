@@ -1,6 +1,6 @@
 #!/usr/bin/expect -f
 
-# 设置更长的超时时间（例如15分钟）
+# 设置超时时间为15分钟
 set timeout 900
 
 # 设置基础目录
@@ -54,3 +54,32 @@ if {[lindex $exit_status 3] != 0} {
     exit 1
 }
 puts "Program api executed successfully."
+
+# 移动CSV文件到filtering_cli文件夹
+puts "Moving CSV file to filtering_cli folder..."
+exec mv "$base_dir/api/$csv_file" "$base_dir/filtering_cli/"
+
+# 定义要执行的预设列表
+set presets {fL gM NPOQ}
+
+# 循环执行每个预设
+foreach preset $presets {
+    puts "Running filter_cli with preset $preset..."
+    spawn sh -c "cd $base_dir/filtering_cli && ./filter_cli -input $csv_file -preset $preset"
+    
+    expect {
+        "File successfully uploaded to S3 bucket" {
+            puts "Filter_cli completed successfully for preset $preset"
+        }
+        timeout {
+            puts "Timeout waiting for filter_cli completion with preset $preset"
+            exit 1
+        }
+        eof {
+            puts "Filter_cli ended unexpectedly for preset $preset"
+            exit 1
+        }
+    }
+}
+
+puts "All operations completed successfully."
