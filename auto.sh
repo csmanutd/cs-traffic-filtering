@@ -1,7 +1,7 @@
 #!/usr/bin/expect -f
 
-# 设置更长的超时时间（例如10分钟）
-set timeout 600
+# 设置更长的超时时间（例如15分钟）
+set timeout 900
 
 # 设置基础目录
 set base_dir "/root/fsx/devtools/filtering"
@@ -17,9 +17,8 @@ send "\r"
 
 # 等待api程序完成提示
 expect {
-    "Data retrieval and CSV creation completed successfully. Output saved to *" {
-        set csv_file $expect_out(0,string)
-        set csv_file [lindex [split $csv_file " "] end]
+    -re "Data retrieval and CSV creation completed successfully\\. Output saved to (\\S+\\.csv)" {
+        set csv_file $expect_out(1,string)
         puts "CSV file created: $csv_file"
     }
     timeout {
@@ -30,11 +29,11 @@ expect {
 
 # 处理S3上传询问
 expect "Do you want to upload the CSV file to S3? (Y/n): "
-send "\r"
+send "Y\r"
 
 # 处理S3配置确认
 expect "Do you want to use this configuration? (Y/n): "
-send "\r"
+send "Y\r"
 
 # 等待上传完成
 expect {
