@@ -12,7 +12,7 @@ puts "Running program api..."
 spawn sh -c "cd $base_dir/api && ./api"
 
 # 等待api程序提示并自动输入
-expect "Enter the date (YYYYMMDD) to retrieve data (leave empty for yesterday):"
+expect "Enter the date (YYYYMMDD) to retrieve data (leave empty for yesterday): "
 send "\r"
 
 # 等待api程序完成提示
@@ -29,11 +29,11 @@ expect {
 }
 
 # 处理S3上传询问
-expect "Do you want to upload the CSV file to S3? (Y/n):"
+expect "Do you want to upload the CSV file to S3? (Y/n): "
 send "\r"
 
 # 处理S3配置确认
-expect "Do you want to use this configuration? (Y/n):"
+expect "Do you want to use this configuration? (Y/n): "
 send "\r"
 
 # 等待上传完成
