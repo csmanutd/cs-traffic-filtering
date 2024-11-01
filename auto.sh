@@ -19,9 +19,9 @@ while {$retry_count < $max_retries} {
     spawn sh -c "cd $base_dir/api_auto && ./api_auto"
     
     expect {
-        "Error during data retrieval: request failed with status code: 503" {
+        -re "Error during data retrieval: request failed with status code: 50\[0-9\]" {
             incr retry_count
-            puts "Encountered 503 error. Retry attempt $retry_count of $max_retries"
+            puts "Encountered 5xx error. Retry attempt $retry_count of $max_retries"
             puts "Waiting for $retry_wait seconds before retrying..."
             exec sleep $retry_wait
             continue
