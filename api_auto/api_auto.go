@@ -216,17 +216,23 @@ func main() {
 	dateStr := date.Format("20060102")
 	outputFile := dateStr + ".csv"
 
-	// 定义时间段（6个时间段，每段4小时，倒序）
+	// 定义时间段（12个时间段，每段2小时，倒序）
 	timeSegments := []struct {
 		fromTime string
 		toTime   string
 	}{
-		{fromTime: date.Add(20 * time.Hour).Format(time.RFC3339), toTime: date.Add(24 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(16 * time.Hour).Format(time.RFC3339), toTime: date.Add(20 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(12 * time.Hour).Format(time.RFC3339), toTime: date.Add(16 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(8 * time.Hour).Format(time.RFC3339), toTime: date.Add(12 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(4 * time.Hour).Format(time.RFC3339), toTime: date.Add(8 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Format(time.RFC3339), toTime: date.Add(4 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(22 * time.Hour).Format(time.RFC3339), toTime: date.Add(24 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(20 * time.Hour).Format(time.RFC3339), toTime: date.Add(22 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(18 * time.Hour).Format(time.RFC3339), toTime: date.Add(20 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(16 * time.Hour).Format(time.RFC3339), toTime: date.Add(18 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(14 * time.Hour).Format(time.RFC3339), toTime: date.Add(16 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(12 * time.Hour).Format(time.RFC3339), toTime: date.Add(14 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(10 * time.Hour).Format(time.RFC3339), toTime: date.Add(12 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(8 * time.Hour).Format(time.RFC3339), toTime: date.Add(10 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(6 * time.Hour).Format(time.RFC3339), toTime: date.Add(8 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(4 * time.Hour).Format(time.RFC3339), toTime: date.Add(6 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(2 * time.Hour).Format(time.RFC3339), toTime: date.Add(4 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Format(time.RFC3339), toTime: date.Add(2 * time.Hour).Format(time.RFC3339)},
 	}
 
 	// 循环处理每个时间段
@@ -252,6 +258,8 @@ func main() {
 			fmt.Printf("Error writing to CSV: %v\n", err)
 			os.Exit(1)
 		}
+
+		time.Sleep(500 * time.Millisecond) // 在每次API调用之间添加短暂延迟
 	}
 
 	// 自动上传到S3
