@@ -216,13 +216,6 @@ func withRetry(operation func() ([]map[string]interface{}, error), maxRetries in
 	return nil, fmt.Errorf("all %d attempts failed, last error: %v", maxRetries, lastErr)
 }
 
-// 添加并发处理的结构
-type SegmentResult struct {
-	Data  []map[string]interface{}
-	Error error
-	Index int
-}
-
 func main() {
 	// 添加命令行选项
 	noS3Upload := flag.Bool("nos3", false, "Skip uploading to S3 bucket")
@@ -268,64 +261,45 @@ func main() {
 		{fromTime: date.Format(time.RFC3339), toTime: date.Add(2 * time.Hour).Format(time.RFC3339)},
 	}
 
-	// 控制并发数
-	maxConcurrent := 3
-	semaphore := make(chan struct{}, maxConcurrent)
-	results := make(chan SegmentResult, len(timeSegments))
-
-	// 启动goroutines处理每个时间段
+	// 循环处理每个时间段
 	for i, segment := range timeSegments {
-		semaphore <- struct{}{} // 限制并发数
-		go func(index int, seg struct{ fromTime, toTime string }) {
-			defer func() { <-semaphore }() // 完成后释放信号量
+		startTime := time.Now()
+		fmt.Printf("Processing time segment %d/%d (%s to %s)\n",
+			i+1, len(timeSegments), segment.fromTime, segment.toTime)
 
-			startTime := time.Now()
-			fmt.Printf("Started processing segment %d/%d (%s to %s)\n",
-				index+1, len(timeSegments), seg.fromTime, seg.toTime)
+		// 使用重试机制包装API调用
+		data, err := withRetry(func() ([]map[string]interface{}, error) {
+			return createFlowReport(
+				config.CloudSecures[selectedCS].APIKey,
+				config.CloudSecures[selectedCS].APISecret,
+				config.CloudSecures[selectedCS].TenantID,
+				outputFile,
+				"csv",
+				segment.fromTime,
+				segment.toTime,
+				10000000,
+			)
+		}, 3) // 最多重试3次
 
-			// 使用重试机制获取数据
-			data, err := withRetry(func() ([]map[string]interface{}, error) {
-				return createFlowReport(
-					config.CloudSecures[selectedCS].APIKey,
-					config.CloudSecures[selectedCS].APISecret,
-					config.CloudSecures[selectedCS].TenantID,
-					outputFile,
-					"csv",
-					seg.fromTime,
-					seg.toTime,
-					10000000,
-				)
-			}, 3)
-
-			processingTime := time.Since(startTime)
-			fmt.Printf("Segment %d processed in %v\n", index+1, processingTime)
-
-			results <- SegmentResult{
-				Data:  data,
-				Error: err,
-				Index: index,
-			}
-		}(i, segment)
-	}
-
-	// 收集所有结果
-	allResults := make([]SegmentResult, len(timeSegments))
-	for i := 0; i < len(timeSegments); i++ {
-		result := <-results
-		allResults[result.Index] = result
-	}
-
-	// 按顺序处理结果并写入CSV
-	for i, result := range allResults {
-		if result.Error != nil {
-			fmt.Printf("Error processing segment %d: %v\n", i+1, result.Error)
+		if err != nil {
+			fmt.Printf("Error during data retrieval after retries: %v\n", err)
 			os.Exit(1)
 		}
 
-		err := writeCSV(outputFile, result.Data, i > 0)
+		appendMode := i > 0
+		err = writeCSV(outputFile, data, appendMode)
 		if err != nil {
-			fmt.Printf("Error writing CSV for segment %d: %v\n", i+1, err)
+			fmt.Printf("Error writing to CSV: %v\n", err)
 			os.Exit(1)
+		}
+
+		// 计算并显示处理时间
+		processingTime := time.Since(startTime)
+		fmt.Printf("Time segment %d processed in %v\n", i+1, processingTime)
+
+		// 添加请求间隔，避免频繁调用
+		if i < len(timeSegments)-1 { // 如果不是最后一个时间段
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
