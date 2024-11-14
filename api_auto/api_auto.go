@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -194,7 +195,32 @@ func SaveS3Config(fileName string, config S3Config) error {
 	return os.WriteFile(fileName, data, 0644)
 }
 
+// 添加重试函数
+func withRetry(operation func() ([]map[string]interface{}, error), maxRetries int) ([]map[string]interface{}, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			// 重试等待时间随重试次数增加
+			waitTime := time.Duration(i) * 2 * time.Second
+			fmt.Printf("Retry attempt %d after %v\n", i, waitTime)
+			time.Sleep(waitTime)
+		}
+
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		fmt.Printf("Attempt %d failed: %v\n", i+1, err)
+	}
+	return nil, fmt.Errorf("all %d attempts failed, last error: %v", maxRetries, lastErr)
+}
+
 func main() {
+	// 添加命令行选项
+	noS3Upload := flag.Bool("nos3", false, "Skip uploading to S3 bucket")
+	flag.Parse()
+
 	const configFileName = "csconfig.json"
 
 	// 加载配置
@@ -237,18 +263,26 @@ func main() {
 
 	// 循环处理每个时间段
 	for i, segment := range timeSegments {
-		data, err := createFlowReport(
-			config.CloudSecures[selectedCS].APIKey,
-			config.CloudSecures[selectedCS].APISecret,
-			config.CloudSecures[selectedCS].TenantID,
-			outputFile,
-			"csv",
-			segment.fromTime,
-			segment.toTime,
-			10000000,
-		)
+		startTime := time.Now()
+		fmt.Printf("Processing time segment %d/%d (%s to %s)\n",
+			i+1, len(timeSegments), segment.fromTime, segment.toTime)
+
+		// 使用重试机制包装API调用
+		data, err := withRetry(func() ([]map[string]interface{}, error) {
+			return createFlowReport(
+				config.CloudSecures[selectedCS].APIKey,
+				config.CloudSecures[selectedCS].APISecret,
+				config.CloudSecures[selectedCS].TenantID,
+				outputFile,
+				"csv",
+				segment.fromTime,
+				segment.toTime,
+				10000000,
+			)
+		}, 3) // 最多重试3次
+
 		if err != nil {
-			fmt.Printf("Error during data retrieval: %v\n", err)
+			fmt.Printf("Error during data retrieval after retries: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -259,21 +293,32 @@ func main() {
 			os.Exit(1)
 		}
 
-		time.Sleep(500 * time.Millisecond) // 在每次API调用之间添加短暂延迟
+		// 计算并显示处理时间
+		processingTime := time.Since(startTime)
+		fmt.Printf("Time segment %d processed in %v\n", i+1, processingTime)
+
+		// 添加请求间隔，避免频繁调用
+		if i < len(timeSegments)-1 { // 如果不是最后一个时间段
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 
-	// 自动上传到S3
-	s3Config, err := LoadS3Config("s3config.json")
-	if err != nil {
-		fmt.Printf("Error loading S3 config: %v\n", err)
-		os.Exit(1)
-	}
+	// 修改S3上传部分
+	if !*noS3Upload {
+		// 自动上传到S3
+		s3Config, err := LoadS3Config("s3config.json")
+		if err != nil {
+			fmt.Printf("Error loading S3 config: %v\n", err)
+			os.Exit(1)
+		}
 
-	err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, outputFile, s3Config.BucketName, s3Config.FolderName)
-	if err != nil {
-		fmt.Printf("Error uploading to S3: %v\n", err)
-		os.Exit(1)
+		err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, outputFile, s3Config.BucketName, s3Config.FolderName)
+		if err != nil {
+			fmt.Printf("Error uploading to S3: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Data retrieval, CSV creation and S3 upload completed successfully. Output saved to %s\n", outputFile)
+	} else {
+		fmt.Printf("Data retrieval and CSV creation completed successfully. S3 upload skipped. Output saved to %s\n", outputFile)
 	}
-
-	fmt.Printf("Data retrieval, CSV creation and S3 upload completed successfully. Output saved to %s\n", outputFile)
 }
