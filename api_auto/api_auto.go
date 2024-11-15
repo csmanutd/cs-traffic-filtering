@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/csmanutd/s3utils" // Import the s3utils package
@@ -216,6 +217,15 @@ func withRetry(operation func() ([]map[string]interface{}, error), maxRetries in
 	return nil, fmt.Errorf("all %d attempts failed, last error: %v", maxRetries, lastErr)
 }
 
+// 修改结构以减少内存占用
+type SegmentResult struct {
+	Error error
+	Index int
+}
+
+// 添加全局互斥锁
+var mu sync.Mutex
+
 func main() {
 	// 添加命令行选项
 	noS3Upload := flag.Bool("nos3", false, "Skip uploading to S3 bucket")
@@ -261,45 +271,60 @@ func main() {
 		{fromTime: date.Format(time.RFC3339), toTime: date.Add(2 * time.Hour).Format(time.RFC3339)},
 	}
 
-	// 循环处理每个时间段
+	// 减少并发数
+	maxConcurrent := 2 // 降低并发数到2
+	semaphore := make(chan struct{}, maxConcurrent)
+	results := make(chan SegmentResult, len(timeSegments))
+
+	// 启动goroutines处理每个时间段
 	for i, segment := range timeSegments {
-		startTime := time.Now()
-		fmt.Printf("Processing time segment %d/%d (%s to %s)\n",
-			i+1, len(timeSegments), segment.fromTime, segment.toTime)
+		semaphore <- struct{}{} // 限制并发数
+		go func(index int, seg struct{ fromTime, toTime string }) {
+			defer func() { <-semaphore }() // 完成后释放信号量
 
-		// 使用重试机制包装API调用
-		data, err := withRetry(func() ([]map[string]interface{}, error) {
-			return createFlowReport(
-				config.CloudSecures[selectedCS].APIKey,
-				config.CloudSecures[selectedCS].APISecret,
-				config.CloudSecures[selectedCS].TenantID,
-				outputFile,
-				"csv",
-				segment.fromTime,
-				segment.toTime,
-				10000000,
-			)
-		}, 3) // 最多重试3次
+			startTime := time.Now()
+			fmt.Printf("Started processing segment %d/%d (%s to %s)\n",
+				index+1, len(timeSegments), seg.fromTime, seg.toTime)
 
-		if err != nil {
-			fmt.Printf("Error during data retrieval after retries: %v\n", err)
+			// 直接处理数据并写入CSV，不保存在内存中
+			data, err := withRetry(func() ([]map[string]interface{}, error) {
+				return createFlowReport(
+					config.CloudSecures[selectedCS].APIKey,
+					config.CloudSecures[selectedCS].APISecret,
+					config.CloudSecures[selectedCS].TenantID,
+					outputFile,
+					"csv",
+					seg.fromTime,
+					seg.toTime,
+					10000000,
+				)
+			}, 3)
+
+			if err == nil {
+				// 使用互斥锁确保CSV写入的顺序
+				mu.Lock()
+				err = writeCSV(outputFile, data, index > 0)
+				mu.Unlock()
+				// 立即释放data的内存
+				data = nil
+			}
+
+			processingTime := time.Since(startTime)
+			fmt.Printf("Segment %d processed in %v\n", index+1, processingTime)
+
+			results <- SegmentResult{
+				Error: err,
+				Index: index,
+			}
+		}(i, segment)
+	}
+
+	// 检查处理结果
+	for i := 0; i < len(timeSegments); i++ {
+		result := <-results
+		if result.Error != nil {
+			fmt.Printf("Error processing segment %d: %v\n", result.Index+1, result.Error)
 			os.Exit(1)
-		}
-
-		appendMode := i > 0
-		err = writeCSV(outputFile, data, appendMode)
-		if err != nil {
-			fmt.Printf("Error writing to CSV: %v\n", err)
-			os.Exit(1)
-		}
-
-		// 计算并显示处理时间
-		processingTime := time.Since(startTime)
-		fmt.Printf("Time segment %d processed in %v\n", i+1, processingTime)
-
-		// 添加请求间隔，避免频繁调用
-		if i < len(timeSegments)-1 { // 如果不是最后一个时间段
-			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
