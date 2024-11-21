@@ -21,17 +21,17 @@ import (
 	"github.com/csmanutd/csutils"
 )
 
-// LoadConfig 从JSON文件读取配置
+// LoadConfig read config from json file
 func LoadConfig(fileName string) (csutils.CloudSecureConfig, error) {
 	return csutils.LoadOrCreateCloudSecureConfig(fileName)
 }
 
-// SaveConfig 将配置保存到JSON文件
+// SaveConfig save config to json file
 func SaveConfig(fileName string, config csutils.CloudSecureConfig) error {
 	return csutils.SaveCloudSecureConfig(fileName, config)
 }
 
-// PromptUserInput 提示用户输入API凭证和租户ID
+// PromptUserInput prompt user to input API credentials and tenant ID
 func PromptUserInput() csutils.CloudSecureInfo {
 	return csutils.CreateNewCloudSecureInfo()
 }
@@ -85,7 +85,7 @@ func createFlowReport(apiKey, apiSecret, tenantID, fileName, fileFormat, fromTim
 		return nil, fmt.Errorf("request failed with status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body) // 使用io包的ReadAll函数
+	body, err := io.ReadAll(resp.Body) // use io package's ReadAll function
 	if err != nil {
 		return nil, fmt.Errorf("error reading response: %v", err)
 	}
@@ -197,7 +197,7 @@ func SaveS3Config(fileName string, config S3Config) error {
 	return os.WriteFile(fileName, data, 0644)
 }
 
-// 添加重试函数
+// add retry function
 func withRetry(operation func() ([]map[string]interface{}, error), maxRetries int) ([]map[string]interface{}, error) {
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
@@ -217,19 +217,19 @@ func withRetry(operation func() ([]map[string]interface{}, error), maxRetries in
 	return nil, fmt.Errorf("all %d attempts failed, last error: %v", maxRetries, lastErr)
 }
 
-// 添加SegmentResult结构
+// add SegmentResult struct
 type SegmentResult struct {
 	Error error
 	Index int
 }
 
-// 添加全局互斥锁
+// add global mutex lock
 var mu sync.Mutex
 
 func main() {
 	const configFileName = "csconfig.json"
 
-	// 添加命令行选项
+	// add command line options
 	csName := flag.String("cs", "", "Specify CloudSecure name")
 	outputFile := flag.String("out", "", "Specify output CSV file name")
 	noS3Upload := flag.Bool("nos3", false, "Skip uploading to S3 bucket")
@@ -298,7 +298,7 @@ func main() {
 		*outputFile = dateInput + ".csv"
 	}
 
-	// 修改时间段定义为12段
+	// modify time segments definition to 12 segments
 	timeSegments := []struct {
 		fromTime string
 		toTime   string
@@ -317,12 +317,12 @@ func main() {
 		{fromTime: date.Format(time.RFC3339), toTime: date.Add(2 * time.Hour).Format(time.RFC3339)},
 	}
 
-	// 添加并发处理
+	// add concurrent processing
 	maxConcurrent := 2
 	semaphore := make(chan struct{}, maxConcurrent)
 	results := make(chan SegmentResult, len(timeSegments))
 
-	// 启动goroutines处理每个时间段
+	// start goroutines to process each time segment
 	for i, segment := range timeSegments {
 		semaphore <- struct{}{}
 		go func(index int, seg struct{ fromTime, toTime string }) {
@@ -362,7 +362,7 @@ func main() {
 		}(i, segment)
 	}
 
-	// 检查处理结果
+	// check processing results
 	for i := 0; i < len(timeSegments); i++ {
 		result := <-results
 		if result.Error != nil {
@@ -371,7 +371,7 @@ func main() {
 		}
 	}
 
-	// 修改S3上传逻辑
+	// modify S3 upload logic
 	if !*noS3Upload {
 		s3Config, err := LoadS3Config("s3config.json")
 		if err != nil {
