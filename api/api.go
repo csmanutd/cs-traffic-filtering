@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/csmanutd/s3utils" // Import the s3utils package
@@ -196,12 +197,42 @@ func SaveS3Config(fileName string, config S3Config) error {
 	return os.WriteFile(fileName, data, 0644)
 }
 
+// 添加重试函数
+func withRetry(operation func() ([]map[string]interface{}, error), maxRetries int) ([]map[string]interface{}, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if i > 0 {
+			waitTime := time.Duration(i) * 2 * time.Second
+			fmt.Printf("Retry attempt %d after %v\n", i, waitTime)
+			time.Sleep(waitTime)
+		}
+
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		fmt.Printf("Attempt %d failed: %v\n", i+1, err)
+	}
+	return nil, fmt.Errorf("all %d attempts failed, last error: %v", maxRetries, lastErr)
+}
+
+// 添加SegmentResult结构
+type SegmentResult struct {
+	Error error
+	Index int
+}
+
+// 添加全局互斥锁
+var mu sync.Mutex
+
 func main() {
 	const configFileName = "csconfig.json"
 
-	// Add command-line flags
+	// 添加命令行选项
 	csName := flag.String("cs", "", "Specify CloudSecure name")
 	outputFile := flag.String("out", "", "Specify output CSV file name")
+	noS3Upload := flag.Bool("nos3", false, "Skip uploading to S3 bucket")
 	flag.Parse()
 
 	// Load configuration
@@ -267,92 +298,95 @@ func main() {
 		*outputFile = dateInput + ".csv"
 	}
 
-	// Define time segments (6 segments, 4 hours each, reverse order)
+	// 修改时间段定义为12段
 	timeSegments := []struct {
 		fromTime string
 		toTime   string
 	}{
-		{fromTime: date.Add(20 * time.Hour).Format(time.RFC3339), toTime: date.Add(24 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(16 * time.Hour).Format(time.RFC3339), toTime: date.Add(20 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(12 * time.Hour).Format(time.RFC3339), toTime: date.Add(16 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(8 * time.Hour).Format(time.RFC3339), toTime: date.Add(12 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Add(4 * time.Hour).Format(time.RFC3339), toTime: date.Add(8 * time.Hour).Format(time.RFC3339)},
-		{fromTime: date.Format(time.RFC3339), toTime: date.Add(4 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(22 * time.Hour).Format(time.RFC3339), toTime: date.Add(24 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(20 * time.Hour).Format(time.RFC3339), toTime: date.Add(22 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(18 * time.Hour).Format(time.RFC3339), toTime: date.Add(20 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(16 * time.Hour).Format(time.RFC3339), toTime: date.Add(18 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(14 * time.Hour).Format(time.RFC3339), toTime: date.Add(16 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(12 * time.Hour).Format(time.RFC3339), toTime: date.Add(14 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(10 * time.Hour).Format(time.RFC3339), toTime: date.Add(12 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(8 * time.Hour).Format(time.RFC3339), toTime: date.Add(10 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(6 * time.Hour).Format(time.RFC3339), toTime: date.Add(8 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(4 * time.Hour).Format(time.RFC3339), toTime: date.Add(6 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Add(2 * time.Hour).Format(time.RFC3339), toTime: date.Add(4 * time.Hour).Format(time.RFC3339)},
+		{fromTime: date.Format(time.RFC3339), toTime: date.Add(2 * time.Hour).Format(time.RFC3339)},
 	}
 
-	// Loop through each time segment, retrieve data, and write to CSV immediately
+	// 添加并发处理
+	maxConcurrent := 2
+	semaphore := make(chan struct{}, maxConcurrent)
+	results := make(chan SegmentResult, len(timeSegments))
+
+	// 启动goroutines处理每个时间段
 	for i, segment := range timeSegments {
-		data, err := createFlowReport(config.CloudSecures[selectedCS].APIKey, config.CloudSecures[selectedCS].APISecret, config.CloudSecures[selectedCS].TenantID, *outputFile, "csv", segment.fromTime, segment.toTime, 10000000)
-		if err != nil {
-			fmt.Printf("Error during data retrieval: %v\n", err)
-			os.Exit(1)
-		}
+		semaphore <- struct{}{}
+		go func(index int, seg struct{ fromTime, toTime string }) {
+			defer func() { <-semaphore }()
 
-		appendMode := i > 0 // Only append for the second segment onwards
-		err = writeCSV(*outputFile, data, appendMode)
-		if err != nil {
-			fmt.Printf("Error writing to CSV: %v\n", err)
+			startTime := time.Now()
+			fmt.Printf("Started processing segment %d/%d (%s to %s)\n",
+				index+1, len(timeSegments), seg.fromTime, seg.toTime)
+
+			data, err := withRetry(func() ([]map[string]interface{}, error) {
+				return createFlowReport(
+					config.CloudSecures[selectedCS].APIKey,
+					config.CloudSecures[selectedCS].APISecret,
+					config.CloudSecures[selectedCS].TenantID,
+					*outputFile,
+					"csv",
+					seg.fromTime,
+					seg.toTime,
+					10000000,
+				)
+			}, 3)
+
+			if err == nil {
+				mu.Lock()
+				err = writeCSV(*outputFile, data, index > 0)
+				mu.Unlock()
+				data = nil
+			}
+
+			processingTime := time.Since(startTime)
+			fmt.Printf("Segment %d processed in %v\n", index+1, processingTime)
+
+			results <- SegmentResult{
+				Error: err,
+				Index: index,
+			}
+		}(i, segment)
+	}
+
+	// 检查处理结果
+	for i := 0; i < len(timeSegments); i++ {
+		result := <-results
+		if result.Error != nil {
+			fmt.Printf("Error processing segment %d: %v\n", result.Index+1, result.Error)
 			os.Exit(1)
 		}
 	}
 
-	fmt.Printf("Data retrieval and CSV creation completed successfully. Output saved to %s\n", *outputFile)
-
-	// Ask user if they want to upload to S3
-	fmt.Print("Do you want to upload the CSV file to S3? (Y/n): ")
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
-
-	if response == "" || response == "y" {
+	// 修改S3上传逻辑
+	if !*noS3Upload {
 		s3Config, err := LoadS3Config("s3config.json")
-		configChanged := false
-		if err == nil {
-			fmt.Printf("Current S3 configuration:\nBucket: %s\nFolder: %s\nProfile: %s\n",
-				s3Config.BucketName, s3Config.FolderName, s3Config.ProfileName)
-			fmt.Print("Do you want to use this configuration? (Y/n): ")
-			useExisting, _ := reader.ReadString('\n')
-			useExisting = strings.TrimSpace(strings.ToLower(useExisting))
-
-			if useExisting != "" && useExisting != "y" {
-				s3Config = S3Config{} // Reset configuration
-				configChanged = true
-			}
-		} else {
-			s3Config = S3Config{} // Create new configuration if loading fails
-			configChanged = true
+		if err != nil {
+			fmt.Printf("Error loading S3 config: %v\n", err)
+			os.Exit(1)
 		}
 
-		if s3Config == (S3Config{}) {
-			fmt.Print("Enter S3 bucket name: ")
-			s3Config.BucketName, _ = reader.ReadString('\n')
-			s3Config.BucketName = strings.TrimSpace(s3Config.BucketName)
-
-			fmt.Print("Enter S3 folder name: ")
-			s3Config.FolderName, _ = reader.ReadString('\n')
-			s3Config.FolderName = strings.TrimSpace(s3Config.FolderName)
-
-			fmt.Print("Enter AWS profile name: ")
-			s3Config.ProfileName, _ = reader.ReadString('\n')
-			s3Config.ProfileName = strings.TrimSpace(s3Config.ProfileName)
-			configChanged = true
-		}
-
-		// Upload file to S3
 		err = s3utils.UploadToS3(s3Config.Region, s3Config.ProfileName, *outputFile, s3Config.BucketName, s3Config.FolderName)
 		if err != nil {
-			fmt.Printf("Error uploading file to S3: %v\n", err)
-		} else {
-			fmt.Println("File successfully uploaded to S3")
-			// Only save if configuration has changed
-			if configChanged {
-				err = SaveS3Config("s3config.json", s3Config)
-				if err != nil {
-					fmt.Printf("Error saving S3 configuration: %v\n", err)
-				} else {
-					fmt.Println("S3 configuration saved")
-				}
-			}
+			fmt.Printf("Error uploading to S3: %v\n", err)
+			os.Exit(1)
 		}
+		fmt.Printf("Data retrieval, CSV creation and S3 upload completed successfully. Output saved to %s\n", *outputFile)
+	} else {
+		fmt.Printf("Data retrieval and CSV creation completed successfully. S3 upload skipped. Output saved to %s\n", *outputFile)
 	}
 }
 
