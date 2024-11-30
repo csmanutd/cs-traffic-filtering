@@ -1,37 +1,31 @@
 #!/bin/bash
 
-# 等待3秒，确保文件已生成并未被占用
+# Wait for 3 seconds to ensure files are generated and not in use
 sleep 3
 
-cd /root/fsx/devtools/cs-traffic-filtering
+cd /root/fsx/devtools/filtering
 
-# 查看 api 文件夹中所有 csv 文件的大小和行数
-echo "检查删除前的文件大小和行数："
-for file in api/*.csv; do
-    if [ -f "$file" ]; then
-        echo "文件: $file"
+# Check if any CSV files exist in filter_cli folder
+csv_files=$(ls filter_cli/*.csv 2>/dev/null)
+
+if [ -n "$csv_files" ]; then
+    # Display size and line count of CSV files before deletion
+    echo "Checking file sizes and line counts before deletion:"
+    for file in $csv_files; do
+        echo "File: $file"
         du -sh "$file"
-        echo "行数: $(wc -l < "$file")"
+        echo "Lines: $(wc -l < "$file")"
         echo "--------------------------"
-    else
-        echo "文件未找到: $file"
     fi
-done
 
-# 执行删除命令，并检查是否成功
-rm -f api/*.csv
-
-# 检查命令的退出状态码
-if [ $? -eq 0 ]; then
-    echo "文件删除成功。"
+    # Execute deletion command
+    rm -f filter_cli/*.csv
+    
+    if [ $? -eq 0 ]; then
+        echo "Files deleted successfully."
+    else
+        echo "Failed to delete files."
+    fi
 else
-    echo "文件删除失败。"
-fi
-
-# 再次检查 api 文件夹，确认是否所有 csv 文件都已被删除
-remaining_files=$(ls api/*.csv 2>/dev/null | wc -l)
-if [ "$remaining_files" -eq 0 ]; then
-    echo "api 文件夹中的所有 csv 文件已成功删除。"
-else
-    echo "警告：api 文件夹中仍有 $remaining_files 个 csv 文件。"
+    echo "No CSV files found in filter_cli folder."
 fi

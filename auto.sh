@@ -7,6 +7,11 @@ set timeout 1800
 set base_dir "/root/fsx/devtools/filtering"
 cd $base_dir
 
+# Execute cleanup script first
+puts "Executing cleanup script..."
+catch {exec sh $base_dir/cleanup.sh} cleanup_result
+puts $cleanup_result
+
 # 定义最大重试次数
 set max_retries 5
 set retry_count 0
