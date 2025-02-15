@@ -1,14 +1,23 @@
+# System files
 .DS_Store
+
+# Data files
 *.txt
 *.json
 *.csv
-filter
 *.png
+
+# Executable files
+filter
 filter_cli/filter_cli*
 api/api*
-auto_test.sh
 api_auto/api_auto
 mail*
+
+# Shell scripts
+*.sh
+
+# Directories to ignore
 general/
 archive/
 api_auto/

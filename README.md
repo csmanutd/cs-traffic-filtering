@@ -1,26 +1,97 @@
-# cs-traffic-filtering
-Get traffic data from CloudSecure and filter the data by iplists.
+# Traffic Filtering Tool
 
-1. Run the api script.    
-   For the 1st time, it will ask you to specify the API key, API secret and tenant id.  
-   Then save this information to a JSON file cloudsecure.config  
-   Next time, it will load the configuration from the JSON file.  
-    
-   This script will retrieve all traffic logs from CloudSecure and export to a csv file(input.csv).  
-   You can specify the date to retrieve. By default (just press enter), it will retrieve yesterday's traffic logs.  
-   
-2. Run the ipl script.  
-   First, you must create a text file subnets.txt and put all the IP CIDR blocks in it.  
-   The script will compare the src and dst IP addresses with the CIDR blocks.  
-   If any addresses don't belong to all of the CIDR blocks, the traffic log will be output to a csv file.   
-   The script will also filter out all DENIED traffic.   
-  
-   Lastly, it will upload the input and output csv files to the s3 bucket.  
-   Please change the bucket name and folder as needed. Make sure you can access the s3 bucket with AWS CLI in your environment.    
-   
-   By default, the script will append the date to the filename.  
-   Then check the s3 bucket to see if there is a file with the same filename.  
-   If there is, it will append '_x' (x means numbers) and then upload.  
+A tool suite for retrieving traffic data from CloudSecure and filtering based on IP lists.
 
-3. If you need full automation. Use the autoscript.sh with crontab or systemctl.
-   But you have to change the directory to your work directory.   
+## Features
+
+- API Service (`api`):
+  - Fetch traffic logs from CloudSecure via API
+  - Segment data retrieval by time periods
+  - Automatic retry mechanism for failed requests
+  - Concurrent processing of time segments
+  - S3 upload integration
+
+- Filtering CLI (`filter_cli`):
+  - Filter traffic data based on CIDR block lists
+  - Support for multiple filtering conditions
+  - Preset-based filtering configurations
+  - Automatic S3 upload of filtered results
+  - Command-line interface for automation
+
+## Usage
+
+### API Service (api)
+
+1. Configure CloudSecure credentials:
+   ```bash
+   ./api -cs <cloudsecure_name>
+   ```
+   First-time users will be prompted to enter API credentials.
+
+2. Fetch traffic data:
+   ```bash
+   ./api -out <output_file.csv> [--date YYYYMMDD] [--nos3]
+   ```
+   - Retrieves yesterday's data by default if no date is specified
+   - `--nos3` flag skips S3 upload
+
+### Filtering Tool (filter_cli)
+
+1. List available presets:
+   ```bash
+   ./filter_cli --list-presets
+   ```
+
+2. Filter traffic data using a preset:
+   ```bash
+   ./filter_cli --input <input_file.csv> --preset <preset_name>
+   ```
+
+## Configuration Files
+
+### cloudsecure.config
+JSON file storing CloudSecure API configuration:
+```json
+{
+    "api_key": "your_api_key",
+    "api_secret": "your_api_secret",
+    "tenant_id": "your_tenant_id"
+}
+```
+
+### s3config.json
+S3 upload configuration for both tools:
+```json
+{
+    "preset_name": "default",
+    "bucket_name": "your_bucket",
+    "folder_name": "your_folder",
+    "profile_name": "aws_profile",
+    "region": "aws_region"
+}
+```
+
+### presets.json
+Filtering presets configuration:
+```json
+[
+    {
+        "name": "preset_name",
+        "conditions": [
+            {
+                "field": "sourceIP",
+                "operator": "==",
+                "listFiles": ["subnets.txt"]
+            }
+        ],
+        "flow_status": "ALLOWED"
+    }
+]
+```
+
+## Requirements
+
+- Go 1.16+
+- AWS CLI (for S3 uploads)
+- Valid CloudSecure API credentials
+- Configured AWS credentials (for S3 access)
