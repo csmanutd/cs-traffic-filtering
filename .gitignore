@@ -9,3 +9,6 @@ api/api*
 auto_test.sh
 api_auto/api_auto
 mail*
+general/
+archive/
+api_auto/
